@@ -410,6 +410,8 @@
   .product-card .rsp:has(s.was){display:flex;flex-direction:column;line-height:1.15;}  /* price over the struck original so the Add button keeps its room */
   .product-card .rsp s.was{font-size:12px;}
   .sale-tag{color:var(--orange);font-weight:600;}
+  .rail-sale{position:absolute;top:8px;left:8px;background:var(--orange);color:var(--cream);font-size:10px;font-weight:800;letter-spacing:.05em;
+    text-transform:uppercase;line-height:1;padding:4px 8px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.45);pointer-events:none;}
 
   /* the glow: a fixed layer behind everything, electric blue rising from the top and cantaloupe from the
      bottom edge, so the midnight page has the depth of the reference hero instead of being flat black */
@@ -1464,9 +1466,10 @@ function buildRail(){
     ? '<div class="rail-bar"></div>' + picks.map((p,i) => {
         const sized = railPhotoCount[railPhotoKey(p)] > 1;
         const label = sized ? railBaseName(p.product) : p.product;
-        return '<button class="rail-item" style="--k:'+(0.85+(i%3)*0.12).toFixed(2)+'" onclick="railPick('+jsArg(p.sku)+')" aria-label="'+(sized?'Choose a size of ':'Add ')+escapeHtml(label)+'">'+
+        const sale = isOnSale(p); // the price shown is already the sale price; the chip says so
+        return '<button class="rail-item" style="--k:'+(0.85+(i%3)*0.12).toFixed(2)+'" onclick="railPick('+jsArg(p.sku)+')" aria-label="'+(sized?'Choose a size of ':'Add ')+escapeHtml(label)+(sale?' (on sale)':'')+'">'+
           RAIL_HANGER+
-          '<div class="rail-photo">'+productImg(p.image_url, [256, 384, 512], '(max-width:520px) 112px, 128px', ' draggable="false"')+'</div>'+
+          '<div class="rail-photo">'+productImg(p.image_url, [256, 384, 512], '(max-width:520px) 112px, 128px', ' draggable="false"')+(sale?'<span class="rail-sale">Sale</span>':'')+'</div>'+
           '<div class="rail-name">'+escapeHtml(label)+'</div>'+
           '<div class="rail-price">'+'R'+money(p.rsp)+(sized?'<i class="sizes" aria-hidden="true">Sizes</i>':'<i aria-hidden="true">+</i>')+'</div>'+
         '</button>';
