@@ -404,6 +404,13 @@
   .swal2-title{font-size:26px !important;}
   @media (max-width:520px){ .trail-banner-title{font-size:38px;} }
 
+  /* sale items: an orange "Sale" chip and the struck original price on cards, an orange tag in the cart */
+  .sale-chip{background:var(--orange);color:var(--cream);border-radius:999px;padding:3px 9px;font-weight:700;white-space:nowrap;}
+  .product-card .rsp s.was,.sale-tag{color:var(--grey);font-weight:500;}
+  .product-card .rsp:has(s.was){display:flex;flex-direction:column;line-height:1.15;}  /* price over the struck original so the Add button keeps its room */
+  .product-card .rsp s.was{font-size:12px;}
+  .sale-tag{color:var(--orange);font-weight:600;}
+
   /* the glow: a fixed layer behind everything, electric blue rising from the top and cantaloupe from the
      bottom edge, so the midnight page has the depth of the reference hero instead of being flat black */
   body::before{content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
@@ -1355,7 +1362,7 @@ function onSearch(){
     const out = Number(p.available) <= 0;
     const unpriced = !(Number(p.rsp) > 0);
     const disabled = out || unpriced;
-    const statusText = '<span class="stock">'+(out ? 'Out of stock' : Math.floor(p.available)+' available')+'</span>';
+    const statusText = '<span class="stock">'+(out ? 'Out of stock' : Math.floor(p.available)+' available')+'</span>'+(isOnSale(p) ? '<span class="sale-chip">Sale</span>' : '');
     const cat = categoryOf(p);
     const meta = CATEGORY_META[cat];
     // real photo once Admin has imported one for this SKU; otherwise fall back to the same
@@ -1369,7 +1376,7 @@ function onSearch(){
         '<div class="name">'+escapeHtml(p.product)+'</div>'+
         '<div class="meta">'+statusText+'<span>SKU '+escapeHtml(p.sku)+'</span></div>'+
         '<div class="foot">'+
-          '<div class="rsp">'+(unpriced?'&mdash;':'R'+money(p.rsp))+'</div>'+
+          '<div class="rsp">'+(unpriced?'&mdash;':'R'+money(p.rsp)+(isOnSale(p)?' <s class="was">R'+money(p.compare_at)+'</s>':''))+'</div>'+
           (disabled?'':'<button class="add" onclick="selectProduct('+jsArg(p.sku)+', this)">+ Add</button>')+
         '</div>'+
       '</div></div>';
@@ -1574,7 +1581,7 @@ function selectProduct(sku, btn){
     if(existing.qty >= MAX_LINE_QTY){ toast('Maximum '+MAX_LINE_QTY+' of one item per order', true); return; }
     existing.qty += 1;
   }
-  else cart.push({sku:p.sku, product:p.product, rsp:Number(p.rsp), qty:1});
+  else cart.push({sku:p.sku, product:p.product, rsp:Number(p.rsp), compare_at:(p.compare_at == null ? null : Number(p.compare_at)), qty:1});
   if(cart.length === 1) orderType = selectedStaff.allowance > 0 ? 'allowance' : 'discount';
   renderCart();
   toast(p.product+' added');
@@ -1622,7 +1629,7 @@ function renderCart(){
     : '<p style="font-size:12px;color:var(--grey);margin:-8px 0 18px">No staff allowance on file — this will go through as a Staff Discount ('+Math.round(CONFIG.DISCOUNT_RATE*100)+'%) purchase.</p>';
   const rows = cart.map(c =>
     '<div class="result-row" style="cursor:default">'+
-      '<div><div class="name">'+escapeHtml(c.product)+'</div><div class="meta">SKU '+escapeHtml(c.sku)+' &middot; RSP R'+money(c.rsp)+'</div></div>'+
+      '<div><div class="name">'+escapeHtml(c.product)+'</div><div class="meta">SKU '+escapeHtml(c.sku)+' &middot; RSP R'+money(c.rsp)+(isOnSale(c)?' &middot; <span class="sale-tag">on sale, was R'+money(c.compare_at)+'</span>':'')+'</div></div>'+
       '<div class="row-flex" style="gap:6px;align-items:center">'+
         '<input type="number" min="1" max="'+MAX_LINE_QTY+'" value="'+c.qty+'" style="width:60px;padding:6px" onchange="updateCartQty('+jsArg(c.sku)+', this.value); this.value=(cart.find(x=>x.sku==='+jsArg(c.sku)+')||{}).qty||1">'+
         '<button class="secondary" onclick="removeFromCart('+jsArg(c.sku)+')">Remove</button>'+
@@ -1648,10 +1655,22 @@ function setOrderType(t){
   renderCartTotals();
 }
 
+// Sale items. products.compare_at is the original price while Shopify has the item on sale (and null otherwise),
+// and products.rsp is then the sale price. Staff discount rule: on a sale item staff pay the LOWER of the sale price
+// and their normal staff price (the original less the staff discount), so the discount never stacks on a sale and a
+// shallow sale never makes an item dearer than usual. Mirrors _order_plan() / validate_order_amount() in the database
+// (see sale-staff-price-migration.sql); until the database has compare_at everything here falls back to the old rule.
+function isOnSale(p){ return Number(p.compare_at) > Number(p.rsp); }
+function staffUnitPrice(p){
+  const rsp = Number(p.rsp), keep = 1 - CONFIG.DISCOUNT_RATE;
+  return isOnSale(p) ? Math.min(rsp, Number(p.compare_at) * keep) : rsp * keep;
+}
+const lineStaffAmount = c => Math.round(staffUnitPrice(c) * c.qty * 100) / 100; // the database rounds each line to cents
+
 function cartTotals(){
   const totalRsp = cart.reduce((s,c)=>s+c.rsp*c.qty, 0);
   if(orderType === 'allowance') return {totalRsp, amount: totalRsp, label:'Deducted from allowance'};
-  const amount = totalRsp*(1-CONFIG.DISCOUNT_RATE);
+  const amount = cart.reduce((sum,c) => sum + lineStaffAmount(c), 0);
   return {totalRsp, amount, label:'Payable by staff member'};
 }
 
@@ -1661,7 +1680,11 @@ function renderCartTotals(){
   const {totalRsp, amount, label} = cartTotals();
   let html = '<div class="amount-row"><span>RSP total</span><span>R'+money(totalRsp)+'</span></div>';
   if(orderType==='discount'){
-    html += '<div class="amount-row"><span>Staff Discount ('+Math.round(CONFIG.DISCOUNT_RATE*100)+'%)</span><span>-R'+money(totalRsp*CONFIG.DISCOUNT_RATE)+'</span></div>';
+    const anySale = cart.some(isOnSale);
+    html += '<div class="amount-row"><span>Staff Discount'+(anySale?'':' ('+Math.round(CONFIG.DISCOUNT_RATE*100)+'%)')+'</span><span>-R'+money(totalRsp-amount)+'</span></div>';
+    if(anySale){
+      html += '<div class="amount-row" style="font-size:12px"><span>Items on sale are priced at the lower of the sale price and your staff price &mdash; the discount never stacks on a sale.</span></div>';
+    }
   }
   html += '<div class="amount-row total"><span>'+label+'</span><span>R'+money(amount)+'</span></div>';
   if(orderType==='allowance' && selectedStaff && amount > selectedStaff.balance){
@@ -1746,6 +1769,18 @@ async function submitCart(){
   let result;
   try{
     const quote = await sb('POST','rpc/quote_order', {p_staff_name: staff.name, p_order_type: type, p_items: items});
+    if(type === 'discount'){
+      // the cart's price comes from the catalogue this page loaded; the database prices the order from the live one,
+      // so a sale starting/ending (or an older open page) can differ — never charge a price the person hasn't seen
+      const shown = cartSnapshot.reduce((sum,c) => sum + lineStaffAmount(c), 0);
+      if(Math.abs(Number(quote.payable_total) - shown) > 0.015){
+        const proceed = await confirmDialog(
+          'The price changed since these items were added: '+(adminProxyMode?staff.name+' will':'you will')+' pay R'+money(quote.payable_total)+' (the cart showed R'+money(shown)+').\n\nPlace the order at the new price?',
+          {title:'Price updated', confirmText:'Place order'}
+        );
+        if(!proceed){ resetBtn(); submittingOrder = false; return; }
+      }
+    }
     if(type === 'allowance'){
       if(Number(quote.balance) <= 0) throw new Error('NO_BALANCE');
       if(quote.is_split){
